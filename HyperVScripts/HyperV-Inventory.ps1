@@ -6,7 +6,7 @@
     including a navigation section and summary table at the top, plus "Go to Top" links.
 .NOTES
     File Name      : HyperV-Inventory.ps1
-    Author         : Your Name
+    Author         : Erick Perez - quadrianweb.com
     Prerequisite   : PowerShell 5.1 or later, Hyper-V module
     Version        : 1.7
 #>
