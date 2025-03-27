@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Creates an HTML inventory of Hyper-V server with cluster awareness and comprehensive VM settings.
+    Creates an HTML inventory of Hyper-V server with navigation and summary features.
 .DESCRIPTION
-    This script gathers detailed information about the Hyper-V host, all VMs, including cluster status,
-    and generates a comprehensive HTML report.
+    This script gathers detailed information about the Hyper-V host and all VMs,
+    including a navigation section and summary table for quick reference.
 .NOTES
     File Name      : HyperV-Inventory.ps1
     Author         : Your Name
-    Prerequisite   : PowerShell 5.1 or later, Hyper-V module, FailoverClusters module (for cluster info)
-    Version        : 1.5
+    Prerequisite   : PowerShell 5.1 or later, Hyper-V module
+    Version        : 1.6
 #>
 
 # HTML styling for the report
@@ -80,6 +80,27 @@ $htmlStyle = @"
         border-radius: 5px;
         margin-top: 15px;
     }
+    .nav-section {
+        background-color: #f5f5f5;
+        padding: 15px;
+        border-radius: 5px;
+        margin-bottom: 20px;
+        border: 1px solid #ddd;
+    }
+    .summary-section {
+        background-color: #f0f8ff;
+        padding: 15px;
+        border-radius: 5px;
+        margin-top: 20px;
+        border: 1px solid #ddd;
+    }
+    .vm-link {
+        color: #2a5885;
+        text-decoration: none;
+    }
+    .vm-link:hover {
+        text-decoration: underline;
+    }
 </style>
 "@
 
@@ -124,8 +145,9 @@ if ($clusterModuleAvailable) {
     }
 }
 
-# Get all VMs
+# Get all VMs and collect summary data
 $virtualMachines = Get-VM | Sort-Object Name
+$vmSummaryData = @()
 
 # Create HTML content
 $htmlContent = @"
@@ -138,6 +160,24 @@ $htmlContent = @"
 <body>
     <h1>Hyper-V Inventory Report</h1>
     <div class="timestamp">Report generated on: $reportDate</div>
+    
+    <!-- Navigation Section -->
+    <div class="nav-section">
+        <h2>Virtual Machine Quick Navigation</h2>
+        <p>
+"@
+
+# Add navigation links for each VM
+foreach ($vm in $virtualMachines) {
+    $vmId = $vm.Name -replace '[^a-zA-Z0-9]',''
+    $htmlContent += @"
+            <a href="#$vmId" class="vm-link">$($vm.Name)</a> | 
+"@
+}
+
+$htmlContent += @"
+        </p>
+    </div>
     
     <div class="host-info">
         <h2>Host System: $($hostComputer.Name)</h2>
@@ -290,8 +330,28 @@ foreach ($vm in $virtualMachines) {
         }
     }
     
+    # Collect IP addresses for summary
+    $ipAddresses = @()
+    foreach ($adapter in $vmNetwork) {
+        if ($adapter.IPAddresses) {
+            $ipAddresses += $adapter.IPAddresses
+        }
+    }
+    $ipList = if ($ipAddresses.Count -gt 0) { $ipAddresses -join ", " } else { "No IP assigned" }
+    
+    # Add VM to summary data
+    $vmSummaryData += [PSCustomObject]@{
+        Name = $vm.Name
+        IPAddresses = $ipList
+        MemoryGB = [math]::Round($vmMemory.Startup / 1GB, 2)
+        State = $vm.State
+        ID = $vm.Id
+    }
+    
+    # Create anchor for navigation
+    $vmId = $vm.Name -replace '[^a-zA-Z0-9]',''
     $htmlContent += @"
-    <div class="vm-section">
+    <div class="vm-section" id="$vmId">
         <h3>$($vm.Name)</h3>
         
         <table>
@@ -546,7 +606,35 @@ foreach ($vm in $virtualMachines) {
 "@
 }
 
+# Add summary section at the end
 $htmlContent += @"
+<div class="summary-section">
+    <h2>Virtual Machine Summary</h2>
+    <table>
+        <tr>
+            <th>VM Name</th>
+            <th>IP Addresses</th>
+            <th>Assigned Memory (GB)</th>
+            <th>State</th>
+            <th>ID</th>
+        </tr>
+"@
+
+foreach ($vm in $vmSummaryData) {
+    $htmlContent += @"
+        <tr>
+            <td>$($vm.Name)</td>
+            <td>$($vm.IPAddresses)</td>
+            <td>$($vm.MemoryGB)</td>
+            <td>$($vm.State)</td>
+            <td>$($vm.ID)</td>
+        </tr>
+"@
+}
+
+$htmlContent += @"
+    </table>
+</div>
 </body>
 </html>
 "@
