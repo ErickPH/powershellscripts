@@ -1,14 +1,14 @@
 <#
 .SYNOPSIS
-    Creates an HTML inventory of Hyper-V server with navigation and summary features.
+    Creates an HTML inventory of Hyper-V server with improved navigation features.
 .DESCRIPTION
     This script gathers detailed information about the Hyper-V host and all VMs,
-    including a navigation section and summary table for quick reference.
+    including a navigation section and summary table at the top, plus "Go to Top" links.
 .NOTES
     File Name      : HyperV-Inventory.ps1
-    Author         : Erick Perez - quadrianweb.com
+    Author         : Your Name
     Prerequisite   : PowerShell 5.1 or later, Hyper-V module
-    Version        : 1.6
+    Version        : 1.7
 #>
 
 # HTML styling for the report
@@ -91,7 +91,7 @@ $htmlStyle = @"
         background-color: #f0f8ff;
         padding: 15px;
         border-radius: 5px;
-        margin-top: 20px;
+        margin-bottom: 20px;
         border: 1px solid #ddd;
     }
     .vm-link {
@@ -99,6 +99,16 @@ $htmlStyle = @"
         text-decoration: none;
     }
     .vm-link:hover {
+        text-decoration: underline;
+    }
+    .top-link {
+        display: block;
+        text-align: right;
+        margin-top: 15px;
+        color: #2a5885;
+        text-decoration: none;
+    }
+    .top-link:hover {
         text-decoration: underline;
     }
 </style>
@@ -177,6 +187,60 @@ foreach ($vm in $virtualMachines) {
 
 $htmlContent += @"
         </p>
+    </div>
+
+    <!-- Summary Section -->
+    <div class="summary-section">
+        <h2>Virtual Machine Summary</h2>
+        <table>
+            <tr>
+                <th>VM Name</th>
+                <th>IP Addresses</th>
+                <th>Assigned Memory (GB)</th>
+                <th>State</th>
+                <th>ID</th>
+            </tr>
+"@
+
+# Process each VM to collect summary data
+foreach ($vm in $virtualMachines) {
+    $vmMemory = $vm | Get-VMMemory
+    $vmNetwork = $vm | Get-VMNetworkAdapter
+    
+    # Collect IP addresses for summary
+    $ipAddresses = @()
+    foreach ($adapter in $vmNetwork) {
+        if ($adapter.IPAddresses) {
+            $ipAddresses += $adapter.IPAddresses
+        }
+    }
+    $ipList = if ($ipAddresses.Count -gt 0) { $ipAddresses -join ", " } else { "No IP assigned" }
+    
+    # Add VM to summary data
+    $vmSummaryData += [PSCustomObject]@{
+        Name = $vm.Name
+        IPAddresses = $ipList
+        MemoryGB = [math]::Round($vmMemory.Startup / 1GB, 2)
+        State = $vm.State
+        ID = $vm.Id
+    }
+}
+
+# Add summary rows
+foreach ($vm in $vmSummaryData) {
+    $htmlContent += @"
+            <tr>
+                <td><a href="#$($vm.Name -replace '[^a-zA-Z0-9]','')" class="vm-link">$($vm.Name)</a></td>
+                <td>$($vm.IPAddresses)</td>
+                <td>$($vm.MemoryGB)</td>
+                <td>$($vm.State)</td>
+                <td>$($vm.ID)</td>
+            </tr>
+"@
+}
+
+$htmlContent += @"
+        </table>
     </div>
     
     <div class="host-info">
@@ -283,10 +347,10 @@ $htmlContent += @"
         </table>
     </div>
     
-    <h2>Virtual Machines ($($virtualMachines.Count))</h2>
+    <h2>Virtual Machine Details</h2>
 "@
 
-# Process each VM
+# Process each VM for detailed sections
 foreach ($vm in $virtualMachines) {
     $vmProcessor = $vm | Get-VMProcessor
     $vmMemory = $vm | Get-VMMemory
@@ -328,24 +392,6 @@ foreach ($vm in $virtualMachines) {
         catch {
             # Cluster commands failed for this VM
         }
-    }
-    
-    # Collect IP addresses for summary
-    $ipAddresses = @()
-    foreach ($adapter in $vmNetwork) {
-        if ($adapter.IPAddresses) {
-            $ipAddresses += $adapter.IPAddresses
-        }
-    }
-    $ipList = if ($ipAddresses.Count -gt 0) { $ipAddresses -join ", " } else { "No IP assigned" }
-    
-    # Add VM to summary data
-    $vmSummaryData += [PSCustomObject]@{
-        Name = $vm.Name
-        IPAddresses = $ipList
-        MemoryGB = [math]::Round($vmMemory.Startup / 1GB, 2)
-        State = $vm.State
-        ID = $vm.Id
     }
     
     # Create anchor for navigation
@@ -601,40 +647,14 @@ foreach ($vm in $virtualMachines) {
 "@
     }
 
+    # Add "Go to Top" link
     $htmlContent += @"
+        <a href="#" class="top-link">Go to Top</a>
     </div>
 "@
 }
 
-# Add summary section at the end
 $htmlContent += @"
-<div class="summary-section">
-    <h2>Virtual Machine Summary</h2>
-    <table>
-        <tr>
-            <th>VM Name</th>
-            <th>IP Addresses</th>
-            <th>Assigned Memory (GB)</th>
-            <th>State</th>
-            <th>ID</th>
-        </tr>
-"@
-
-foreach ($vm in $vmSummaryData) {
-    $htmlContent += @"
-        <tr>
-            <td>$($vm.Name)</td>
-            <td>$($vm.IPAddresses)</td>
-            <td>$($vm.MemoryGB)</td>
-            <td>$($vm.State)</td>
-            <td>$($vm.ID)</td>
-        </tr>
-"@
-}
-
-$htmlContent += @"
-    </table>
-</div>
 </body>
 </html>
 "@
