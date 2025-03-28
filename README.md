@@ -4,7 +4,14 @@ This repository contains a collection of PowerShell scripts designed to simplify
 
 ## Contents
 
+HyperVScripts Directory
 - **HyperV-Inventory.ps1**: Script to document HyperV virtual machines.
+
+Windows Directory
+- Execute-RemoteScript.ps1
+- Find-RDPComputers.ps1
+- GatherUsers.ps1
+- Windows-Inventory.ps1
 
 ## Usage
 
