@@ -14,10 +14,26 @@
     The email address to send the generated report to. If not specified, the report will not be emailed.
 .PARAMETER OutputDir
     The directory where the generated report will be saved. Defaults to "C:\InventoryReports".
+.PARAMETER IncludeGroupPolicy
+    Include details about applied Group Policies. Defaults to $false.
+.PARAMETER IncludeScheduledTasks
+    Include a list of scheduled tasks on the machine. Defaults to $false.
+.PARAMETER IncludeActiveDirectory
+    Include Active Directory information if the machine is part of a domain. Defaults to $false.
+.PARAMETER IncludeWindowsFeatures
+    Include a list of installed Windows features and roles. Defaults to $false.
+.PARAMETER IncludeEventLogs
+    Include a summary of recent critical or error events from the Windows Event Log. Defaults to $false.
+.PARAMETER IncludeFirewallAntivirus
+    Include the status of the Windows Firewall and installed antivirus software. Defaults to $false.
+.PARAMETER IncludeGPU
+    Include details about the GPU(s) installed on the machine. Defaults to $false.
+.PARAMETER All
+    Include all optional sections in the report. Defaults to $false.
 .EXAMPLE
-    .\Windows-Inventory.ps1 -ComputerName "RemotePC01" -ExportFormat "JSON" -EmailRecipient "admin@example.com"
-    This command generates a system inventory report for the remote computer "RemotePC01" in JSON format
-    and emails the report to "admin@example.com".
+    .\Windows-Inventory.ps1 -ComputerName "RemotePC01" -ExportFormat "JSON" -EmailRecipient "admin@example.com" -All
+    This command generates a system inventory report for the remote computer "RemotePC01" in JSON format,
+    includes all optional sections, and emails the report to "admin@example.com".
 .NOTES
     File Name      : Windows-Inventory.ps1
     Author         : Erick Perez - quadrianweb.com
@@ -30,7 +46,7 @@
                     For more information, see: 
                     https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/enable-psremoting?view=powershell-7.5
                     https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management
-                    Version        : 2.1
+    Version        : 2.2
     Change Log     : 
         - Added collapsible sections for better readability
         - Added export to CSV and JSON formats
@@ -43,6 +59,8 @@
         - Made output directory configurable via command-line parameter
         - Added example for remote execution with JSON export and email
         - Added note about WinRM requirement
+        - Added optional sections for Group Policy, Scheduled Tasks, Active Directory, Windows Features, Event Logs, Firewall/Antivirus, and GPU
+        - Added an -All parameter to include all optional sections
 #>
 
 # Parameters
@@ -50,8 +68,27 @@ param (
     [string]$ComputerName = $env:COMPUTERNAME,
     [string]$ExportFormat = "HTML", # Options: HTML, CSV, JSON
     [string]$EmailRecipient = $null,
-    [string]$OutputDir = "C:\InventoryReports"
+    [string]$OutputDir = "C:\InventoryReports",
+    [switch]$IncludeGroupPolicy = $false,
+    [switch]$IncludeScheduledTasks = $false,
+    [switch]$IncludeActiveDirectory = $false,
+    [switch]$IncludeWindowsFeatures = $false,
+    [switch]$IncludeEventLogs = $false,
+    [switch]$IncludeFirewallAntivirus = $false,
+    [switch]$IncludeGPU = $false,
+    [switch]$All = $false
 )
+
+# Enable all sections if -All is specified
+if ($All) {
+    $IncludeGroupPolicy = $true
+    $IncludeScheduledTasks = $true
+    $IncludeActiveDirectory = $true
+    $IncludeWindowsFeatures = $true
+    $IncludeEventLogs = $true
+    $IncludeFirewallAntivirus = $true
+    $IncludeGPU = $true
+}
 
 # Output file configuration
 $outputFileBase = "$OutputDir\${ComputerName}_SystemInventory_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
@@ -79,11 +116,9 @@ function Test-WinRM {
     )
     try {
         if ($ComputerName -eq $env:COMPUTERNAME) {
-            # Check locally
             $winrmStatus = Get-Service -Name WinRM -ErrorAction SilentlyContinue
             return $winrmStatus.Status -eq 'Running'
         } else {
-            # Check remotely
             $winrmStatus = Invoke-Command -ComputerName $ComputerName -ScriptBlock {
                 Get-Service -Name WinRM -ErrorAction SilentlyContinue
             } -ErrorAction SilentlyContinue
@@ -144,7 +179,6 @@ $htmlContent = $htmlHeader
 # Collect system information
 try {
     if ($ComputerName -eq $env:COMPUTERNAME -or (Test-Connection -ComputerName $ComputerName -Count 1 -Quiet)) {
-        # Local machine or reachable remote machine
         $os = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_OperatingSystem
         $computerSystem = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_ComputerSystem
         $bios = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_BIOS
@@ -359,6 +393,125 @@ try {
     $htmlContent += "<p>Error collecting system health metrics.</p>"
 }
 $htmlContent += "</div></div>"
+
+# Optional Sections
+if ($IncludeGroupPolicy) {
+    $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('groupPolicy')`">Group Policy Information</h2>"
+    $htmlContent += "<div id='groupPolicy' style='display: none;'>"
+    try {
+        $gpResult = gpresult /r
+        $htmlContent += "<pre>$gpResult</pre>"
+    } catch {
+        Log-Error "Error collecting Group Policy information: $_"
+        $htmlContent += "<p>Error collecting Group Policy information.</p>"
+    }
+    $htmlContent += "</div></div>"
+}
+
+if ($IncludeScheduledTasks) {
+    $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('scheduledTasks')`">Scheduled Tasks</h2>"
+    $htmlContent += "<div id='scheduledTasks' style='display: none;'>"
+    try {
+        $tasks = Get-ScheduledTask | Select-Object TaskName, State
+        $htmlContent += "<table><tr><th>Task Name</th><th>State</th></tr>"
+        foreach ($task in $tasks) {
+            $htmlContent += "<tr><td>$($task.TaskName)</td><td>$($task.State)</td></tr>"
+        }
+        $htmlContent += "</table>"
+    } catch {
+        Log-Error "Error collecting scheduled tasks: $_"
+        $htmlContent += "<p>Error collecting scheduled tasks.</p>"
+    }
+    $htmlContent += "</div></div>"
+}
+
+if ($IncludeActiveDirectory) {
+    $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('activeDirectory')`">Active Directory Information</h2>"
+    $htmlContent += "<div id='activeDirectory' style='display: none;'>"
+    try {
+        $adInfo = Get-ADComputer -Identity $ComputerName -Properties *
+        $htmlContent += "<pre>$($adInfo | Out-String)</pre>"
+    } catch {
+        Log-Error "Error collecting Active Directory information: $_"
+        $htmlContent += "<p>Error collecting Active Directory information.</p>"
+    }
+    $htmlContent += "</div></div>"
+}
+
+if ($IncludeWindowsFeatures) {
+    $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('windowsFeatures')`">Windows Features</h2>"
+    $htmlContent += "<div id='windowsFeatures' style='display: none;'>"
+    try {
+        $features = Get-WindowsFeature | Where-Object { $_.Installed -eq $true }
+        $htmlContent += "<table><tr><th>Feature Name</th><th>Display Name</th></tr>"
+        foreach ($feature in $features) {
+            $htmlContent += "<tr><td>$($feature.Name)</td><td>$($feature.DisplayName)</td></tr>"
+        }
+        $htmlContent += "</table>"
+    } catch {
+        Log-Error "Error collecting Windows Features: $_"
+        $htmlContent += "<p>Error collecting Windows Features.</p>"
+    }
+    $htmlContent += "</div></div>"
+}
+
+if ($IncludeEventLogs) {
+    $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('eventLogs')`">Event Logs</h2>"
+    $htmlContent += "<div id='eventLogs' style='display: none;'>"
+    try {
+        $events = Get-WinEvent -LogName System -MaxEvents 10 | Select-Object TimeCreated, LevelDisplayName, Message
+        $htmlContent += "<table><tr><th>Time</th><th>Level</th><th>Message</th></tr>"
+        foreach ($event in $events) {
+            $htmlContent += "<tr><td>$($event.TimeCreated)</td><td>$($event.LevelDisplayName)</td><td>$($event.Message)</td></tr>"
+        }
+        $htmlContent += "</table>"
+    } catch {
+        Log-Error "Error collecting Event Logs: $_"
+        $htmlContent += "<p>Error collecting Event Logs.</p>"
+    }
+    $htmlContent += "</div></div>"
+}
+
+if ($IncludeFirewallAntivirus) {
+    $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('firewallAntivirus')`">Firewall and Antivirus</h2>"
+    $htmlContent += "<div id='firewallAntivirus' style='display: none;'>"
+    try {
+        $firewallStatus = Get-NetFirewallProfile | Select-Object Name, Enabled
+        $antivirusStatus = Get-CimInstance -Namespace "root\SecurityCenter2" -ClassName AntiVirusProduct
+        $htmlContent += "<h3>Firewall Status</h3><table><tr><th>Profile</th><th>Enabled</th></tr>"
+        foreach ($profile in $firewallStatus) {
+            $htmlContent += "<tr><td>$($profile.Name)</td><td>$($profile.Enabled)</td></tr>"
+        }
+        $htmlContent += "</table>"
+        $htmlContent += "<h3>Antivirus Status</h3><table><tr><th>Product Name</th><th>Enabled</th></tr>"
+        foreach ($av in $antivirusStatus) {
+            $htmlContent += "<tr><td>$($av.displayName)</td><td>$($av.productState)</td></tr>"
+        }
+        $htmlContent += "</table>"
+    } catch {
+        Log-Error "Error collecting Firewall and Antivirus information: $_"
+        $htmlContent += "<p>Error collecting Firewall and Antivirus information.</p>"
+    }
+    $htmlContent += "</div></div>"
+}
+
+if ($IncludeGPU) {
+    $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('gpuInfo')`">GPU Information</h2>"
+    $htmlContent += "<div id='gpuInfo' style='display: none;'>"
+    try {
+        $gpus = Get-CimInstance -ClassName Win32_VideoController
+        $htmlContent += "<table><tr><th>Name</th><th>Driver Version</th><th>Memory (MB)</th></tr>"
+        foreach ($gpu in $gpus) {
+            $memoryMB = [math]::Round($gpu.AdapterRAM / 1MB, 2)
+            $htmlContent += "<tr><td>$($gpu.Name)</td><td>$($gpu.DriverVersion)</td><td>$memoryMB</td></tr>"
+        }
+        $htmlContent += "</table>"
+    } catch {
+        Log-Error "Error collecting GPU information: $_"
+        $htmlContent += "<p>Error collecting GPU information.</p>"
+    }
+    $htmlContent += "</div></div>"
+}
 
 # Export to CSV and JSON
 if ($ExportFormat -eq "CSV") {
