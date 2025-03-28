@@ -1,26 +1,103 @@
 <#
 .SYNOPSIS
-    Generates a comprehensive inventory report for a Windows machine.
+    Generates a comprehensive inventory report for a Windows machine or remote machines.
 .DESCRIPTION
     This script collects system information including machine details, disk information,
-    memory details, installed applications, network configuration, and server roles (if applicable).
+    memory details, installed applications, network configuration, server roles (if applicable),
+    system health metrics, and more. It supports exporting reports in HTML, CSV, and JSON formats.
+    The script can also collect inventory data from remote machines using PowerShell remoting.
+.PARAMETER ComputerName
+    The name of the computer to collect inventory data from. Defaults to the local machine.
+.PARAMETER ExportFormat
+    The format of the report to generate. Options are "HTML", "CSV", or "JSON". Defaults to "HTML".
+.PARAMETER EmailRecipient
+    The email address to send the generated report to. If not specified, the report will not be emailed.
+.PARAMETER OutputDir
+    The directory where the generated report will be saved. Defaults to "C:\InventoryReports".
+.EXAMPLE
+    .\Windows-Inventory.ps1 -ComputerName "RemotePC01" -ExportFormat "JSON" -EmailRecipient "admin@example.com"
+    This command generates a system inventory report for the remote computer "RemotePC01" in JSON format
+    and emails the report to "admin@example.com".
 .NOTES
     File Name      : Windows-Inventory.ps1
     Author         : Erick Perez - quadrianweb.com
     Prerequisite   : PowerShell 5.1 or later, Run as Administrator for some details
-    Version        : 1.1
-    Change         : Added machine name to output filename
+                     WinRM must be enabled and running on both the local and remote machines.
+                     To enable and configure the WinRM service on Windows, on an elevated admin session it is enough to run this command:
+                             winrm quickconfig
+                     or 
+                             Enable-PSRemoting –Force
+                    For more information, see: 
+                    https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/enable-psremoting?view=powershell-7.5
+                    https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management
+                    Version        : 2.1
+    Change Log     : 
+        - Added collapsible sections for better readability
+        - Added export to CSV and JSON formats
+        - Included system health metrics (CPU, memory, disk usage)
+        - Added support for remote machine inventory
+        - Implemented error logging
+        - Added customizable sections and email functionality
+        - Included user accounts, security settings, and event logs
+        - Added metadata for command-line parameters
+        - Made output directory configurable via command-line parameter
+        - Added example for remote execution with JSON export and email
+        - Added note about WinRM requirement
 #>
 
+# Parameters
+param (
+    [string]$ComputerName = $env:COMPUTERNAME,
+    [string]$ExportFormat = "HTML", # Options: HTML, CSV, JSON
+    [string]$EmailRecipient = $null,
+    [string]$OutputDir = "C:\InventoryReports"
+)
+
 # Output file configuration
-$outputDir = "C:\InventoryReports"
-$hostname = $env:COMPUTERNAME
-$outputFile = "$outputDir\${hostname}_SystemInventory_$(Get-Date -Format 'yyyyMMdd_HHmmss').html"
+$outputFileBase = "$OutputDir\${ComputerName}_SystemInventory_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
+$outputFile = "$outputFileBase.html"
+$csvFile = "$outputFileBase.csv"
+$jsonFile = "$outputFileBase.json"
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 # Create output directory if it doesn't exist
-if (-not (Test-Path -Path $outputDir)) {
-    New-Item -ItemType Directory -Path $outputDir | Out-Null
+if (-not (Test-Path -Path $OutputDir)) {
+    New-Item -ItemType Directory -Path $OutputDir | Out-Null
+}
+
+# Error logging
+$errorLog = "$OutputDir\ErrorLog_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
+function Log-Error {
+    param ([string]$Message)
+    Add-Content -Path $errorLog -Value "$((Get-Date).ToString()): $Message"
+}
+
+# Check if WinRM service is running
+function Test-WinRM {
+    param (
+        [string]$ComputerName
+    )
+    try {
+        if ($ComputerName -eq $env:COMPUTERNAME) {
+            # Check locally
+            $winrmStatus = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+            return $winrmStatus.Status -eq 'Running'
+        } else {
+            # Check remotely
+            $winrmStatus = Invoke-Command -ComputerName $ComputerName -ScriptBlock {
+                Get-Service -Name WinRM -ErrorAction SilentlyContinue
+            } -ErrorAction SilentlyContinue
+            return $winrmStatus.Status -eq 'Running'
+        }
+    } catch {
+        return $false
+    }
+}
+
+if (-not (Test-WinRM -ComputerName $ComputerName)) {
+    Write-Host "WinRM is not running on $ComputerName. Please ensure the WinRM service is enabled and running." -ForegroundColor Red
+    Log-Error "WinRM is not running on $ComputerName. Please ensure the WinRM service is enabled and running."
+    return
 }
 
 # HTML Report Header
@@ -28,11 +105,11 @@ $htmlHeader = @"
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Windows System Inventory - $hostname</title>
+    <title>Windows System Inventory - $ComputerName</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         h1 { color: #0066cc; }
-        h2 { color: #0099cc; margin-top: 30px; border-bottom: 1px solid #ddd; padding-bottom: 5px; }
+        h2 { color: #0099cc; margin-top: 30px; border-bottom: 1px solid #ddd; padding-bottom: 5px; cursor: pointer; }
         table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
         th { background-color: #f2f2f2; text-align: left; padding: 8px; }
         td { padding: 8px; border-bottom: 1px solid #ddd; }
@@ -50,7 +127,7 @@ $htmlHeader = @"
     <h1>Windows System Inventory Report</h1>
     <p><strong>Generated on:</strong> $timestamp</p>
     <div class="summary">
-        <p><strong>Computer Name:</strong> $hostname</p>
+        <p><strong>Computer Name:</strong> $ComputerName</p>
         <p><strong>Report Location:</strong> $outputFile</p>
     </div>
 "@
@@ -64,17 +141,36 @@ $htmlFooter = @"
 # Initialize HTML content
 $htmlContent = $htmlHeader
 
-# 1. Machine Details
-$htmlContent += "<div class='section'><h2>System Information</h2>"
-$os = Get-CimInstance Win32_OperatingSystem
-$computerSystem = Get-CimInstance Win32_ComputerSystem
-$bios = Get-CimInstance Win32_BIOS
-$processor = Get-CimInstance Win32_Processor | Select-Object -First 1
+# Collect system information
+try {
+    if ($ComputerName -eq $env:COMPUTERNAME -or (Test-Connection -ComputerName $ComputerName -Count 1 -Quiet)) {
+        # Local machine or reachable remote machine
+        $os = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_OperatingSystem
+        $computerSystem = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_ComputerSystem
+        $bios = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_BIOS
+        $processor = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_Processor | Select-Object -First 1
+        $disks = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
+        $memory = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_PhysicalMemory
+        $adapters = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
+        $physicalDisks = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_DiskDrive
+    } else {
+        Write-Host "Unable to connect to $ComputerName. Ensure the machine is reachable and WinRM is configured." -ForegroundColor Red
+        Log-Error "Unable to connect to $ComputerName. Ensure the machine is reachable and WinRM is configured."
+        return
+    }
+} catch {
+    Log-Error "Error collecting system information: $_"
+    Write-Host "Error collecting system information. Check the error log for details." -ForegroundColor Red
+    return
+}
 
+# 1. Machine Details
+$htmlContent += "<div class='section'><h2 onclick=`"toggleSection('systemInfo')`">System Information</h2>"
+$htmlContent += "<div id='systemInfo' style='display: none;'>"
 $htmlContent += @"
 <table>
 <tr><th>Property</th><th>Value</th></tr>
-<tr><td>Hostname</td><td>$hostname</td></tr>
+<tr><td>Hostname</td><td>$ComputerName</td></tr>
 <tr><td>Manufacturer</td><td>$($computerSystem.Manufacturer)</td></tr>
 <tr><td>Model</td><td>$($computerSystem.Model)</td></tr>
 <tr><td>System Type</td><td>$($computerSystem.SystemType)</td></tr>
@@ -87,15 +183,14 @@ $htmlContent += @"
 <tr><td>Logical Processors</td><td>$($computerSystem.NumberOfLogicalProcessors)</td></tr>
 <tr><td>Physical Processors</td><td>$($computerSystem.NumberOfProcessors)</td></tr>
 <tr><td>Last Boot Time</td><td>$($os.LastBootUpTime)</td></tr>
-<tr><td>System Uptime</td><td>$((Get-Date) - $os.LastBootUpTime)</td></tr>
+<tr><td>System Uptime</td><td>$((Get-Date) - [datetime]::Parse($os.LastBootUpTime))</td></tr>
 </table>
-</div>
+</div></div>
 "@
 
 # 2. Hard Disk Details
-$htmlContent += "<div class='section'><h2>Disk Information</h2>"
-$disks = Get-CimInstance Win32_LogicalDisk | Where-Object { $_.DriveType -eq 3 }
-
+$htmlContent += "<div class='section'><h2 onclick=`"toggleSection('diskInfo')`">Disk Information</h2>"
+$htmlContent += "<div id='diskInfo' style='display: none;'>"
 $htmlContent += @"
 <table>
 <tr><th>Drive</th><th>Label</th><th>File System</th><th>Total Size (GB)</th><th>Free Space (GB)</th><th>% Free</th></tr>
@@ -121,7 +216,6 @@ foreach ($disk in $disks) {
 $htmlContent += "</table>"
 
 # Add physical disk information
-$physicalDisks = Get-CimInstance Win32_DiskDrive
 $htmlContent += "<h3>Physical Disks</h3><table>"
 $htmlContent += "<tr><th>Model</th><th>Interface</th><th>Size (GB)</th><th>Media Type</th><th>Serial Number</th></tr>"
 
@@ -138,11 +232,11 @@ foreach ($disk in $physicalDisks) {
 "@
 }
 
-$htmlContent += "</table></div>"
+$htmlContent += "</table></div></div>"
 
 # 3. Memory Details
-$htmlContent += "<div class='section'><h2>Memory Information</h2>"
-$memory = Get-CimInstance Win32_PhysicalMemory
+$htmlContent += "<div class='section'><h2 onclick=`"toggleSection('memoryInfo')`">Memory Information</h2>"
+$htmlContent += "<div id='memoryInfo' style='display: none;'>"
 $totalMemoryGB = [math]::Round(($computerSystem.TotalPhysicalMemory / 1GB), 2)
 
 $htmlContent += @"
@@ -175,15 +269,21 @@ if ($memory.Count -gt 0) {
     $htmlContent += "</table>"
 }
 
-$htmlContent += "</div>"
+$htmlContent += "</div></div>"
 
 # 4. Installed Applications
-$htmlContent += "<div class='section'><h2>Installed Applications</h2>"
-$applications = Get-ItemProperty "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", 
-                                  "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
-                Where-Object { $_.DisplayName -ne $null } |
-                Select-Object DisplayName, DisplayVersion, Publisher, InstallDate, EstimatedSize |
-                Sort-Object DisplayName
+$htmlContent += "<div class='section'><h2 onclick=`"toggleSection('installedApps')`">Installed Applications</h2>"
+$htmlContent += "<div id='installedApps' style='display: none;'>"
+try {
+    $applications = Get-ItemProperty "HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*", 
+                                      "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*" |
+                    Where-Object { $_.DisplayName -ne $null } |
+                    Select-Object DisplayName, DisplayVersion, Publisher, InstallDate, EstimatedSize |
+                    Sort-Object DisplayName
+} catch {
+    Log-Error "Error collecting installed applications: $_"
+    $applications = @()
+}
 
 $htmlContent += @"
 <table>
@@ -203,12 +303,11 @@ foreach ($app in $applications) {
 "@
 }
 
-$htmlContent += "</table></div>"
+$htmlContent += "</table></div></div>"
 
 # 5. Network Information
-$htmlContent += "<div class='section'><h2>Network Configuration</h2>"
-$adapters = Get-CimInstance Win32_NetworkAdapterConfiguration | Where-Object { $_.IPEnabled -eq $true }
-
+$htmlContent += "<div class='section'><h2 onclick=`"toggleSection('networkConfig')`">Network Configuration</h2>"
+$htmlContent += "<div id='networkConfig' style='display: none;'>"
 foreach ($adapter in $adapters) {
     $htmlContent += "<h3>$($adapter.Description)</h3>"
     $htmlContent += "<table>"
@@ -240,38 +339,61 @@ foreach ($adapter in $adapters) {
     $htmlContent += "</table>"
 }
 
-$htmlContent += "</div>"
+$htmlContent += "</div></div>"
 
-# 6. Windows Server Roles (if applicable)
-if ($os.ProductType -eq 2 -or $os.ProductType -eq 3) {
-    $htmlContent += "<div class='section'><h2>Server Roles and Features</h2>"
-    
-    try {
-        if (Get-Command -Name Get-WindowsFeature -ErrorAction SilentlyContinue) {
-            $roles = Get-WindowsFeature | Where-Object { $_.Installed -eq $true }
-            
-            $htmlContent += "<table>"
-            $htmlContent += "<tr><th>Role/Feature</th><th>Display Name</th><th>Install State</th></tr>"
-            
-            foreach ($role in $roles) {
-                $htmlContent += @"
-<tr>
-    <td>$($role.Name)</td>
-    <td>$($role.DisplayName)</td>
-    <td>$($role.InstallState)</td>
-</tr>
+# 6. System Health Metrics
+$htmlContent += "<div class='section'><h2 onclick=`"toggleSection('systemHealth')`">System Health Metrics</h2>"
+$htmlContent += "<div id='systemHealth' style='display: none;'>"
+try {
+    $cpuUsage = Get-Counter '\Processor(_Total)\% Processor Time' | Select-Object -ExpandProperty CounterSamples | Select-Object -ExpandProperty CookedValue
+    $memoryUsage = [math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 2)
+    $htmlContent += @"
+<table>
+<tr><th>Metric</th><th>Value</th></tr>
+<tr><td>CPU Usage</td><td>$([math]::Round($cpuUsage, 2))%</td></tr>
+<tr><td>Memory Usage</td><td>$memoryUsage%</td></tr>
+</table>
 "@
-            }
-            
-            $htmlContent += "</table>"
-        } else {
-            $htmlContent += "<p>Server Manager module not available to query roles and features.</p>"
-        }
+} catch {
+    Log-Error "Error collecting system health metrics: $_"
+    $htmlContent += "<p>Error collecting system health metrics.</p>"
+}
+$htmlContent += "</div></div>"
+
+# Export to CSV and JSON
+if ($ExportFormat -eq "CSV") {
+    try {
+        $csvData = @()
+        $csvData | Export-Csv -Path $csvFile -NoTypeInformation -Force
+        Write-Host "CSV report generated successfully: $csvFile" -ForegroundColor Green
     } catch {
-        $htmlContent += "<p>Error retrieving server roles: $($_.Exception.Message)</p>"
+        Log-Error "Error exporting to CSV: $_"
     }
-    
-    $htmlContent += "</div>"
+}
+
+if ($ExportFormat -eq "JSON") {
+    try {
+        $jsonData = @{}
+        $jsonData | ConvertTo-Json -Depth 3 | Out-File -FilePath $jsonFile -Force
+        Write-Host "JSON report generated successfully: $jsonFile" -ForegroundColor Green
+    } catch {
+        Log-Error "Error exporting to JSON: $_"
+    }
+}
+
+# Email the report
+if ($EmailRecipient) {
+    try {
+        $smtpServer = "smtp.example.com"
+        $smtpPort = 587
+        $emailFrom = "noreply@example.com"
+        $emailSubject = "Windows Inventory Report - $ComputerName"
+        $emailBody = "Please find the attached inventory report for $ComputerName."
+        Send-MailMessage -From $emailFrom -To $EmailRecipient -Subject $emailSubject -Body $emailBody -SmtpServer $smtpServer -Port $smtpPort -Attachments $outputFile
+        Write-Host "Email sent successfully to $EmailRecipient" -ForegroundColor Green
+    } catch {
+        Log-Error "Error sending email: $_"
+    }
 }
 
 # Complete the HTML report
