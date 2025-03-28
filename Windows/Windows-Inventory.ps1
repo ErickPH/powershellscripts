@@ -39,6 +39,12 @@ $htmlHeader = @"
         .section { margin-bottom: 30px; }
         .summary { background-color: #f9f9f9; padding: 15px; border-radius: 5px; }
     </style>
+    <script>
+        function toggleSection(id) {
+            var section = document.getElementById(id);
+            section.style.display = section.style.display === 'none' ? 'block' : 'none';
+        }
+    </script>
 </head>
 <body>
     <h1>Windows System Inventory Report</h1>
