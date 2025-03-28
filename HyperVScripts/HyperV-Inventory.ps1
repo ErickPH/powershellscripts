@@ -8,7 +8,14 @@
     File Name      : HyperV-Inventory.ps1
     Author         : Erick Perez - quadrianweb.com
     Prerequisite   : PowerShell 5.1 or later, Hyper-V module
-    Version        : 1.7
+    Version        : 1.8
+    Changelog      :
+        - Added error logging to a log file for troubleshooting.
+        - Added validation for prerequisites like Hyper-V module and administrative privileges.
+        - Improved error handling with try-catch blocks for critical sections.
+        - Added progress indicators to inform the user about script execution stages.
+        - Allowed user to specify a custom output path for the HTML report.
+        - Provided a summary of errors encountered during execution.
 #>
 
 # HTML styling for the report
@@ -114,6 +121,32 @@ $htmlStyle = @"
 </style>
 "@
 
+# Define a log file for error logging
+$logFilePath = "HyperV-Inventory-ErrorLog-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+
+# Function to log errors
+function Log-Error {
+    param (
+        [string]$Message
+    )
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    $logEntry = "[$timestamp] ERROR: $Message"
+    Add-Content -Path $logFilePath -Value $logEntry
+    Write-Host $logEntry -ForegroundColor Red
+}
+
+# Validate prerequisites
+if (-not (Get-Command -Name Get-VM -ErrorAction SilentlyContinue)) {
+    Log-Error "Hyper-V module is not available. Please ensure it is installed and loaded."
+    exit
+}
+
+# Check if the user has administrative privileges
+if (-not ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Log-Error "This script must be run as an administrator."
+    exit
+}
+
 # Check if FailoverClusters module is available
 $clusterModuleAvailable = $false
 try {
@@ -129,14 +162,19 @@ catch {
 # Get current date and time for the report
 $reportDate = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
-# Get Hyper-V host information
-$hostComputer = Get-CimInstance -ClassName Win32_ComputerSystem
-$hostOS = Get-CimInstance -ClassName Win32_OperatingSystem
-$hostProcessor = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
-$hostMemory = Get-CimInstance -ClassName Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum | Select-Object Sum
-$hostNetwork = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
-$hostVirtualSwitch = Get-VMSwitch
-$hostStorage = Get-PhysicalDisk | Select-Object FriendlyName, MediaType, Size, HealthStatus, OperationalStatus
+# Wrap critical sections in try-catch blocks
+try {
+    # Get Hyper-V host information
+    $hostComputer = Get-CimInstance -ClassName Win32_ComputerSystem
+    $hostOS = Get-CimInstance -ClassName Win32_OperatingSystem
+    $hostProcessor = Get-CimInstance -ClassName Win32_Processor | Select-Object -First 1
+    $hostMemory = Get-CimInstance -ClassName Win32_PhysicalMemory | Measure-Object -Property Capacity -Sum | Select-Object Sum
+    $hostNetwork = Get-NetAdapter | Where-Object { $_.Status -eq 'Up' }
+    $hostVirtualSwitch = Get-VMSwitch
+    $hostStorage = Get-PhysicalDisk | Select-Object FriendlyName, MediaType, Size, HealthStatus, OperationalStatus
+} catch {
+    Log-Error "Failed to retrieve host information: $_"
+}
 
 # Get cluster information if available
 $clusterInfo = $null
@@ -151,12 +189,28 @@ if ($clusterModuleAvailable) {
         }
     }
     catch {
-        # Cluster commands failed
+        Log-Error "Failed to retrieve cluster information: $_"
     }
 }
 
+# Wrap critical sections in try-catch blocks
+try {
+    # Get all VMs
+    $virtualMachines = Get-VM | Sort-Object Name
+} catch {
+    Log-Error "Failed to retrieve virtual machines: $_"
+}
+
+# Add progress indicators
+Write-Host "Generating Hyper-V inventory report..." -ForegroundColor Cyan
+
+# Allow user to specify a custom output path
+$reportPath = Read-Host "Enter the desired output path for the report (press Enter to use default)" 
+if (-not $reportPath) {
+    $reportPath = "HyperV-Inventory-$($hostComputer.Name)-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+}
+
 # Get all VMs and collect summary data
-$virtualMachines = Get-VM | Sort-Object Name
 $vmSummaryData = @()
 
 # Create HTML content
@@ -390,7 +444,7 @@ foreach ($vm in $virtualMachines) {
             }
         }
         catch {
-            # Cluster commands failed for this VM
+            Log-Error "Failed to retrieve cluster information for VM $($vm.Name): $_"
         }
     }
     
@@ -659,8 +713,17 @@ $htmlContent += @"
 </html>
 "@
 
-# Save the HTML report
-$reportPath = "HyperV-Inventory-$($hostComputer.Name)-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
-$htmlContent | Out-File -FilePath $reportPath -Force
+# Save the HTML report with error handling
+try {
+    $htmlContent | Out-File -FilePath $reportPath -Force
+    Write-Host "Inventory report generated: $((Get-Item $reportPath).FullName)" -ForegroundColor Green
+} catch {
+    Log-Error "Failed to save the report: $_"
+}
 
-Write-Host "Inventory report generated: $((Get-Item $reportPath).FullName)"
+# Provide a summary of errors if any
+if (Test-Path $logFilePath) {
+    Write-Host "Errors were encountered during execution. See the log file for details: $logFilePath" -ForegroundColor Yellow
+} else {
+    Write-Host "Script completed successfully without errors." -ForegroundColor Green
+}
