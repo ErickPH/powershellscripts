@@ -46,7 +46,8 @@
                     For more information, see: 
                     https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.core/enable-psremoting?view=powershell-7.5
                     https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management
-    Version        : 2.2
+    Version        : 2.3
+    Modification Date: 2023-10-05
     Change Log     : 
         - Added collapsible sections for better readability
         - Added export to CSV and JSON formats
@@ -61,6 +62,7 @@
         - Added note about WinRM requirement
         - Added optional sections for Group Policy, Scheduled Tasks, Active Directory, Windows Features, Event Logs, Firewall/Antivirus, and GPU
         - Added an -All parameter to include all optional sections
+        - Added a section to collect installed features and roles for Windows Server
 #>
 
 # Parameters
@@ -79,8 +81,11 @@ param (
     [switch]$All = $false
 )
 
+Write-Host "Starting Windows Inventory Script..." -ForegroundColor Cyan
+
 # Enable all sections if -All is specified
 if ($All) {
+    Write-Host "Enabling all optional sections as -All parameter is specified..." -ForegroundColor Cyan
     $IncludeGroupPolicy = $true
     $IncludeScheduledTasks = $true
     $IncludeActiveDirectory = $true
@@ -91,6 +96,7 @@ if ($All) {
 }
 
 # Output file configuration
+Write-Host "Configuring output files and directories..." -ForegroundColor Cyan
 $outputFileBase = "$OutputDir\${ComputerName}_SystemInventory_$(Get-Date -Format 'yyyyMMdd_HHmmss')"
 $outputFile = "$outputFileBase.html"
 $csvFile = "$outputFileBase.csv"
@@ -109,6 +115,7 @@ function Log-Error {
     Add-Content -Path $errorLog -Value "$((Get-Date).ToString()): $Message"
 }
 
+Write-Host "Checking WinRM service status..." -ForegroundColor Cyan
 # Check if WinRM service is running
 function Test-WinRM {
     param (
@@ -135,6 +142,7 @@ if (-not (Test-WinRM -ComputerName $ComputerName)) {
     return
 }
 
+Write-Host "Collecting system information for $ComputerName..." -ForegroundColor Cyan
 # HTML Report Header
 $htmlHeader = @"
 <!DOCTYPE html>
@@ -198,7 +206,10 @@ try {
     return
 }
 
+Write-Host "Generating HTML report sections..." -ForegroundColor Cyan
+
 # 1. Machine Details
+Write-Host "Adding Machine Details to the report..." -ForegroundColor Cyan
 $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('systemInfo')`">System Information</h2>"
 $htmlContent += "<div id='systemInfo' style='display: none;'>"
 $htmlContent += @"
@@ -223,6 +234,7 @@ $htmlContent += @"
 "@
 
 # 2. Hard Disk Details
+Write-Host "Adding Disk Information to the report..." -ForegroundColor Cyan
 $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('diskInfo')`">Disk Information</h2>"
 $htmlContent += "<div id='diskInfo' style='display: none;'>"
 $htmlContent += @"
@@ -269,6 +281,7 @@ foreach ($disk in $physicalDisks) {
 $htmlContent += "</table></div></div>"
 
 # 3. Memory Details
+Write-Host "Adding Memory Information to the report..." -ForegroundColor Cyan
 $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('memoryInfo')`">Memory Information</h2>"
 $htmlContent += "<div id='memoryInfo' style='display: none;'>"
 $totalMemoryGB = [math]::Round(($computerSystem.TotalPhysicalMemory / 1GB), 2)
@@ -306,6 +319,7 @@ if ($memory.Count -gt 0) {
 $htmlContent += "</div></div>"
 
 # 4. Installed Applications
+Write-Host "Adding Installed Applications to the report..." -ForegroundColor Cyan
 $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('installedApps')`">Installed Applications</h2>"
 $htmlContent += "<div id='installedApps' style='display: none;'>"
 try {
@@ -340,6 +354,7 @@ foreach ($app in $applications) {
 $htmlContent += "</table></div></div>"
 
 # 5. Network Information
+Write-Host "Adding Network Configuration to the report..." -ForegroundColor Cyan
 $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('networkConfig')`">Network Configuration</h2>"
 $htmlContent += "<div id='networkConfig' style='display: none;'>"
 foreach ($adapter in $adapters) {
@@ -375,7 +390,39 @@ foreach ($adapter in $adapters) {
 
 $htmlContent += "</div></div>"
 
-# 6. System Health Metrics
+# 6. Features and Roles (Windows Server)
+Write-Host "Checking for installed features and roles (Windows Server)..." -ForegroundColor Cyan
+$htmlContent += "<div class='section'><h2 onclick=`"toggleSection('featuresRoles')`">Installed Features and Roles</h2>"
+$htmlContent += "<div id='featuresRoles' style='display: none;'>"
+
+try {
+    $os = Get-CimInstance -ComputerName $ComputerName -ClassName Win32_OperatingSystem
+    if ($os.Caption -like "*Server*") {
+        Write-Host "Collecting installed features and roles for Windows Server..." -ForegroundColor Cyan
+        $featuresRoles = Get-WindowsFeature | Where-Object { $_.Installed -eq $true }
+        $htmlContent += "<table><tr><th>Feature/Role Name</th><th>Display Name</th></tr>"
+        foreach ($feature in $featuresRoles) {
+            $htmlContent += @"
+<tr>
+    <td>$($feature.Name)</td>
+    <td>$($feature.DisplayName)</td>
+</tr>
+"@
+        }
+        $htmlContent += "</table>"
+    } else {
+        Write-Host "The computer is not a Windows Server. Skipping features and roles collection." -ForegroundColor Yellow
+        $htmlContent += "<p>The computer is not a Windows Server. No features or roles to display.</p>"
+    }
+} catch {
+    Log-Error "Error collecting features and roles: $_"
+    $htmlContent += "<p>Error collecting features and roles.</p>"
+}
+
+$htmlContent += "</div></div>"
+
+# 7. System Health Metrics
+Write-Host "Adding System Health Metrics to the report..." -ForegroundColor Cyan
 $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('systemHealth')`">System Health Metrics</h2>"
 $htmlContent += "<div id='systemHealth' style='display: none;'>"
 try {
@@ -396,6 +443,7 @@ $htmlContent += "</div></div>"
 
 # Optional Sections
 if ($IncludeGroupPolicy) {
+    Write-Host "Adding Group Policy Information to the report..." -ForegroundColor Cyan
     $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('groupPolicy')`">Group Policy Information</h2>"
     $htmlContent += "<div id='groupPolicy' style='display: none;'>"
     try {
@@ -409,6 +457,7 @@ if ($IncludeGroupPolicy) {
 }
 
 if ($IncludeScheduledTasks) {
+    Write-Host "Adding Scheduled Tasks to the report..." -ForegroundColor Cyan
     $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('scheduledTasks')`">Scheduled Tasks</h2>"
     $htmlContent += "<div id='scheduledTasks' style='display: none;'>"
     try {
@@ -426,6 +475,7 @@ if ($IncludeScheduledTasks) {
 }
 
 if ($IncludeActiveDirectory) {
+    Write-Host "Adding Active Directory Information to the report..." -ForegroundColor Cyan
     $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('activeDirectory')`">Active Directory Information</h2>"
     $htmlContent += "<div id='activeDirectory' style='display: none;'>"
     try {
@@ -439,6 +489,7 @@ if ($IncludeActiveDirectory) {
 }
 
 if ($IncludeWindowsFeatures) {
+    Write-Host "Adding Windows Features to the report..." -ForegroundColor Cyan
     $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('windowsFeatures')`">Windows Features</h2>"
     $htmlContent += "<div id='windowsFeatures' style='display: none;'>"
     try {
@@ -456,6 +507,7 @@ if ($IncludeWindowsFeatures) {
 }
 
 if ($IncludeEventLogs) {
+    Write-Host "Adding Event Logs to the report..." -ForegroundColor Cyan
     $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('eventLogs')`">Event Logs</h2>"
     $htmlContent += "<div id='eventLogs' style='display: none;'>"
     try {
@@ -473,6 +525,7 @@ if ($IncludeEventLogs) {
 }
 
 if ($IncludeFirewallAntivirus) {
+    Write-Host "Adding Firewall and Antivirus Information to the report..." -ForegroundColor Cyan
     $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('firewallAntivirus')`">Firewall and Antivirus</h2>"
     $htmlContent += "<div id='firewallAntivirus' style='display: none;'>"
     try {
@@ -496,6 +549,7 @@ if ($IncludeFirewallAntivirus) {
 }
 
 if ($IncludeGPU) {
+    Write-Host "Adding GPU Information to the report..." -ForegroundColor Cyan
     $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('gpuInfo')`">GPU Information</h2>"
     $htmlContent += "<div id='gpuInfo' style='display: none;'>"
     try {
@@ -515,6 +569,7 @@ if ($IncludeGPU) {
 
 # Export to CSV and JSON
 if ($ExportFormat -eq "CSV") {
+    Write-Host "Exporting report to CSV format..." -ForegroundColor Cyan
     try {
         $csvData = @()
         $csvData | Export-Csv -Path $csvFile -NoTypeInformation -Force
@@ -525,6 +580,7 @@ if ($ExportFormat -eq "CSV") {
 }
 
 if ($ExportFormat -eq "JSON") {
+    Write-Host "Exporting report to JSON format..." -ForegroundColor Cyan
     try {
         $jsonData = @{}
         $jsonData | ConvertTo-Json -Depth 3 | Out-File -FilePath $jsonFile -Force
@@ -536,6 +592,7 @@ if ($ExportFormat -eq "JSON") {
 
 # Email the report
 if ($EmailRecipient) {
+    Write-Host "Sending the report via email to $EmailRecipient..." -ForegroundColor Cyan
     try {
         $smtpServer = "smtp.example.com"
         $smtpPort = 587
@@ -549,13 +606,16 @@ if ($EmailRecipient) {
     }
 }
 
+Write-Host "Finalizing the HTML report..." -ForegroundColor Cyan
 # Complete the HTML report
 $htmlContent += $htmlFooter
 
+Write-Host "Saving the report to $outputFile..." -ForegroundColor Cyan
 # Save the report to file
 $htmlContent | Out-File -FilePath $outputFile -Force
 
 Write-Host "Inventory report generated successfully: $outputFile" -ForegroundColor Green
 
+Write-Host "Opening the report in the default browser..." -ForegroundColor Cyan
 # Open the report in default browser
 Start-Process $outputFile
