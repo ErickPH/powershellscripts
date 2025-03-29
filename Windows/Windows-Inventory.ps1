@@ -63,6 +63,8 @@
         - Added optional sections for Group Policy, Scheduled Tasks, Active Directory, Windows Features, Event Logs, Firewall/Antivirus, and GPU
         - Added an -All parameter to include all optional sections
         - Added a section to collect installed features and roles for Windows Server
+        - Updated System Uptime and Last Boot Time to use [Management.ManagementDateTimeConverter]::ToDateTime for proper parsing
+        - Replaced Get-Counter with Get-CimInstance for CPU usage to ensure language independence
 #>
 
 # Parameters
@@ -227,8 +229,8 @@ $htmlContent += @"
 <tr><td>Processor</td><td>$($processor.Name)</td></tr>
 <tr><td>Logical Processors</td><td>$($computerSystem.NumberOfLogicalProcessors)</td></tr>
 <tr><td>Physical Processors</td><td>$($computerSystem.NumberOfProcessors)</td></tr>
-<tr><td>Last Boot Time</td><td>$($os.LastBootUpTime)</td></tr>
-<tr><td>System Uptime</td><td>$((Get-Date) - [datetime]::Parse($os.LastBootUpTime))</td></tr>
+<tr><td>Last Boot Time</td><td>$([Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime))</td></tr>
+<tr><td>System Uptime</td><td>$((Get-Date) - [Management.ManagementDateTimeConverter]::ToDateTime($os.LastBootUpTime))</td></tr>
 </table>
 </div></div>
 "@
@@ -311,7 +313,7 @@ if ($memory.Count -gt 0) {
     <td>$($module.SerialNumber)</td>
 </tr>
 "@
-        $slot++
+        $slot++ 
     }
     $htmlContent += "</table>"
 }
@@ -426,12 +428,14 @@ Write-Host "Adding System Health Metrics to the report..." -ForegroundColor Cyan
 $htmlContent += "<div class='section'><h2 onclick=`"toggleSection('systemHealth')`">System Health Metrics</h2>"
 $htmlContent += "<div id='systemHealth' style='display: none;'>"
 try {
-    $cpuUsage = Get-Counter '\Processor(_Total)\% Processor Time' | Select-Object -ExpandProperty CounterSamples | Select-Object -ExpandProperty CookedValue
+    # Use Get-CimInstance to retrieve CPU usage
+    $cpuLoad = Get-CimInstance -ClassName Win32_Processor | Measure-Object -Property LoadPercentage -Average | Select-Object -ExpandProperty Average
+    $cpuUsage = [math]::Round($cpuLoad, 2)
     $memoryUsage = [math]::Round((($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / $os.TotalVisibleMemorySize) * 100, 2)
     $htmlContent += @"
 <table>
 <tr><th>Metric</th><th>Value</th></tr>
-<tr><td>CPU Usage</td><td>$([math]::Round($cpuUsage, 2))%</td></tr>
+<tr><td>CPU Usage</td><td>$cpuUsage%</td></tr>
 <tr><td>Memory Usage</td><td>$memoryUsage%</td></tr>
 </table>
 "@
