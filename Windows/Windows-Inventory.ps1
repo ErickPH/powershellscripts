@@ -153,6 +153,31 @@ function Decode-AntivirusState {
     }
 }
 
+Write-Host "Checking required modules..." -ForegroundColor Cyan
+function Ensure-Module {
+    param (
+        [string]$ModuleName
+    )
+    if (-not (Get-Module -ListAvailable -Name $ModuleName)) {
+        try {
+            Write-Host "Module '$ModuleName' is not loaded. Attempting to import..." -ForegroundColor Yellow
+            Import-Module -Name $ModuleName -ErrorAction Stop
+            Write-Host "Module '$ModuleName' imported successfully." -ForegroundColor Green
+        } catch {
+            Log-Error "Failed to import module '$ModuleName': $_"
+            throw "Required module '$ModuleName' is not available. Please install it before running the script."
+        }
+    } else {
+        Write-Host "Module '$ModuleName' is already available." -ForegroundColor Green
+    }
+}
+
+# Check and import required modules
+Ensure-Module -ModuleName "ServerManager"
+if ($IncludeActiveDirectory) {
+    Ensure-Module -ModuleName "ActiveDirectory"
+}
+
 Write-Host "Checking WinRM service status..." -ForegroundColor Cyan
 # Enhanced Test-WinRM function
 function Test-WinRM {
