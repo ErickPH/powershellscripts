@@ -207,7 +207,7 @@ Write-Host "Generating Hyper-V inventory report..." -ForegroundColor Cyan
 # Allow user to specify a custom output path
 $reportPath = Read-Host "Enter the desired output path for the report (press Enter to use default)" 
 if (-not $reportPath) {
-    $reportPath = "HyperV-Inventory-$($hostComputer.Name)-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+    $reportPath = "$($hostComputer.Name)-HyperV-Inventory-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
 }
 
 # Get all VMs and collect summary data
