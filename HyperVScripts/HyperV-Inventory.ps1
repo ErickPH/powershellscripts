@@ -258,6 +258,7 @@ $htmlContent += @"
 
 # Process each VM to collect summary data
 foreach ($vm in $virtualMachines) {
+    Write-Host "Generating Hyper-V inventory report for VM $($vm.Name)...." -ForegroundColor Cyan
     $vmMemory = $vm | Get-VMMemory
     $vmNetwork = $vm | Get-VMNetworkAdapter
     
