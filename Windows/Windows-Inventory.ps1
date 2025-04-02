@@ -165,7 +165,13 @@ function Ensure-Module {
 # Check and import required modules
 Ensure-Module -ModuleName "ServerManager"
 if ($IncludeActiveDirectory) {
-    Ensure-Module -ModuleName "ActiveDirectory"
+    try {
+        Ensure-Module -ModuleName "ActiveDirectory"
+    } catch {
+        Log-Error "Failed to import module 'ActiveDirectory': $_"
+        Write-Host "Warning: The 'ActiveDirectory' module could not be loaded. Active Directory information will not be included in the report." -ForegroundColor Yellow
+        $IncludeActiveDirectory = $false
+    }
 }
 
 # Enhanced Test-WinRM function
