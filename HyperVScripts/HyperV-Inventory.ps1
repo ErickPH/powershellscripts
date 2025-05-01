@@ -10,8 +10,11 @@
     Date           : 2025-05-01
     GitHub         : https://github.com/erickph
     Prerequisite   : PowerShell 5.1 or later, Hyper-V module
-    Version        : 1.12
+    Version        : 1.13
     Changelog      :
+        - Added Integration Services status checking for guest OS detection
+        - Added detailed status messages for guest OS information availability
+        - Added warning messages in HTML when guest OS information is not available
         - Fixed guest OS detection to work for all VMs, not just the first one
         - Added Windows Server 2016 compatibility for guest OS detection
         - Added guest OS information for each VM (name, version, architecture, state, uptime)
@@ -464,43 +467,60 @@ foreach ($vm in $virtualMachines) {
     
     # Get guest OS information if available
     $vmGuestOS = $null
+    $integrationServicesStatus = $null
     try {
-        if (Get-Command -Name Get-VMGuest -ErrorAction SilentlyContinue) {
-            # Modern method (Windows Server 2019+)
-            $vmGuestOS = $vm | Get-VMGuest
-            Write-Host "Retrieved guest OS info for $($vm.Name) using Get-VMGuest: $($vmGuestOS.OSName)" -ForegroundColor Cyan
-        } else {
-            # Legacy method (Windows Server 2016)
-            $vmElementName = $vm.ElementName
-            if (-not $vmElementName) {
-                $vmElementName = $vm.Name
-            }
-            
-            $kvp = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$vmElementName'" | 
-                   Get-CimAssociatedInstance -ResultClassName Msvm_KvpExchangeComponent
-            
-            if ($kvp -and $kvp.GuestIntrinsicExchangeItems) {
-                $kvpData = @{}
-                foreach ($item in $kvp.GuestIntrinsicExchangeItems) {
-                    if ($item.Data -ne $null) {
-                        $kvpData[$item.Name] = [System.Text.Encoding]::Unicode.GetString($item.Data)
-                    }
-                }
-                
-                if ($kvpData.Count -gt 0) {
-                    $vmGuestOS = [PSCustomObject]@{
-                        OSName = $kvpData['OSName']
-                        OSVersion = $kvpData['OSVersion']
-                        OSArchitecture = $kvpData['OSArchitecture']
-                        State = $vm.State
-                        Uptime = $vm.Uptime
-                    }
-                    Write-Host "Retrieved guest OS info for $($vm.Name) using KVP: $($vmGuestOS.OSName)" -ForegroundColor Cyan
+        # Check Integration Services status first
+        $integrationServices = $vm | Get-VMIntegrationService
+        $integrationServicesStatus = $integrationServices | Where-Object { $_.Name -eq "Guest Service Interface" }
+        
+        if ($integrationServicesStatus -and $integrationServicesStatus.Enabled -and $integrationServicesStatus.OperationalStatus -eq "OK") {
+            if (Get-Command -Name Get-VMGuest -ErrorAction SilentlyContinue) {
+                # Modern method (Windows Server 2019+)
+                $vmGuestOS = $vm | Get-VMGuest
+                if ($vmGuestOS) {
+                    Write-Host "Retrieved guest OS info for $($vm.Name) using Get-VMGuest: $($vmGuestOS.OSName)" -ForegroundColor Cyan
                 } else {
-                    Write-Host "No valid guest OS data found for $($vm.Name)" -ForegroundColor Yellow
+                    Write-Host "Get-VMGuest returned no data for $($vm.Name)" -ForegroundColor Yellow
                 }
             } else {
-                Write-Host "No KVP data available for $($vm.Name)" -ForegroundColor Yellow
+                # Legacy method (Windows Server 2016)
+                $vmElementName = $vm.ElementName
+                if (-not $vmElementName) {
+                    $vmElementName = $vm.Name
+                }
+                
+                $kvp = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$vmElementName'" | 
+                       Get-CimAssociatedInstance -ResultClassName Msvm_KvpExchangeComponent
+                
+                if ($kvp -and $kvp.GuestIntrinsicExchangeItems) {
+                    $kvpData = @{}
+                    foreach ($item in $kvp.GuestIntrinsicExchangeItems) {
+                        if ($item.Data -ne $null) {
+                            $kvpData[$item.Name] = [System.Text.Encoding]::Unicode.GetString($item.Data)
+                        }
+                    }
+                    
+                    if ($kvpData.Count -gt 0) {
+                        $vmGuestOS = [PSCustomObject]@{
+                            OSName = $kvpData['OSName']
+                            OSVersion = $kvpData['OSVersion']
+                            OSArchitecture = $kvpData['OSArchitecture']
+                            State = $vm.State
+                            Uptime = $vm.Uptime
+                        }
+                        Write-Host "Retrieved guest OS info for $($vm.Name) using KVP: $($vmGuestOS.OSName)" -ForegroundColor Cyan
+                    } else {
+                        Write-Host "No valid guest OS data found for $($vm.Name)" -ForegroundColor Yellow
+                    }
+                } else {
+                    Write-Host "No KVP data available for $($vm.Name)" -ForegroundColor Yellow
+                }
+            }
+        } else {
+            if ($integrationServicesStatus) {
+                Write-Host "Guest Service Interface is not enabled or not operational for $($vm.Name) (Status: $($integrationServicesStatus.OperationalStatus))" -ForegroundColor Yellow
+            } else {
+                Write-Host "Guest Service Interface is not available for $($vm.Name)" -ForegroundColor Yellow
             }
         }
     } catch {
@@ -571,6 +591,10 @@ foreach ($vm in $virtualMachines) {
             <tr><td>Guest OS Architecture</td><td>$($vmGuestOS.OSArchitecture)</td></tr>
             <tr><td>Guest OS State</td><td>$($vmGuestOS.State)</td></tr>
             <tr><td>Guest OS Uptime</td><td>$($vmGuestOS.Uptime)</td></tr>
+"@
+    } else {
+        $htmlContent += @"
+            <tr><td>Guest OS Information</td><td class="warning">Not available. Ensure Hyper-V Integration Services are installed and running in the guest OS.</td></tr>
 "@
     }
 
