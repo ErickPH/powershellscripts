@@ -468,6 +468,7 @@ foreach ($vm in $virtualMachines) {
         if (Get-Command -Name Get-VMGuest -ErrorAction SilentlyContinue) {
             # Modern method (Windows Server 2019+)
             $vmGuestOS = $vm | Get-VMGuest
+            Write-Host "Retrieved guest OS info for $($vm.Name) using Get-VMGuest: $($vmGuestOS.OSName)" -ForegroundColor Cyan
         } else {
             # Legacy method (Windows Server 2016)
             $vmElementName = $vm.ElementName
@@ -491,9 +492,13 @@ foreach ($vm in $virtualMachines) {
                     State = $vm.State
                     Uptime = $vm.Uptime
                 }
+                Write-Host "Retrieved guest OS info for $($vm.Name) using KVP: $($vmGuestOS.OSName)" -ForegroundColor Cyan
+            } else {
+                Write-Host "No guest OS info available for $($vm.Name)" -ForegroundColor Yellow
             }
         }
     } catch {
+        Write-Host "Error retrieving guest OS info for $($vm.Name): $_" -ForegroundColor Red
         $vmGuestOS = $null
     }
     
