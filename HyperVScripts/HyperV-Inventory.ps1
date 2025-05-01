@@ -6,17 +6,52 @@
     including a navigation section and summary table at the top, plus "Go to Top" links.
 .NOTES
     File Name      : HyperV-Inventory.ps1
-    Author         : Erick Perez - quadrianweb.com
+    Author         : Erick Perez
+    Date           : 2025-05-01
+    GitHub         : https://github.com/erickph
     Prerequisite   : PowerShell 5.1 or later, Hyper-V module
-    Version        : 1.8
+    Version        : 1.10
     Changelog      :
-        - Added error logging to a log file for troubleshooting.
-        - Added validation for prerequisites like Hyper-V module and administrative privileges.
-        - Improved error handling with try-catch blocks for critical sections.
-        - Added progress indicators to inform the user about script execution stages.
-        - Allowed user to specify a custom output path for the HTML report.
-        - Provided a summary of errors encountered during execution.
+        - Added guest OS information for each VM (name, version, architecture, state, uptime)
+        - Made -NonInteractive the default behavior
+        - Added -Interactive parameter to enable user interaction
+        - Added error logging to a log file for troubleshooting
+        - Added validation for prerequisites like Hyper-V module and administrative privileges
+        - Improved error handling with try-catch blocks for critical sections
+        - Added progress indicators to inform the user about script execution stages
+        - Allowed user to specify a custom output path for the HTML report
+        - Provided a summary of errors encountered during execution
+
+    Examples:
+        # Run in non-interactive mode (default)
+        .\HyperV-Inventory.ps1
+        
+        # Run in interactive mode
+        .\HyperV-Inventory.ps1 -Interactive
+        
+        # Specify custom output path
+        .\HyperV-Inventory.ps1 -OutputPath "C:\Reports\HyperV-Inventory.html"
+        
+        # Run in interactive mode with custom output path
+        .\HyperV-Inventory.ps1 -Interactive -OutputPath "C:\Reports\HyperV-Inventory.html"
 #>
+
+# Default parameters
+$OutputPath = "$env:TEMP\$($env:COMPUTERNAME)-HyperV-Inventory-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+$Interactive = $false
+
+# Check for command line arguments
+if ($args.Count -gt 0) {
+    for ($i = 0; $i -lt $args.Count; $i++) {
+        if ($args[$i] -eq "-Interactive") {
+            $Interactive = $true
+        }
+        elseif ($args[$i] -eq "-OutputPath" -and $i -lt ($args.Count - 1)) {
+            $OutputPath = $args[$i + 1]
+            $i++ # Skip the next argument as it's the path value
+        }
+    }
+}
 
 # HTML styling for the report
 $htmlStyle = @"
@@ -122,7 +157,7 @@ $htmlStyle = @"
 "@
 
 # Define a log file for error logging
-$logFilePath = "HyperV-Inventory-ErrorLog-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+$logFilePath = "$env:TEMP\$($env:COMPUTERNAME)-HyperV-Inventory-$(Get-Date -Format 'yyyyMMdd-HHmmss')-ErrorLog.log"
 
 # Function to log errors
 function Log-Error {
@@ -204,10 +239,12 @@ try {
 # Add progress indicators
 Write-Host "Generating Hyper-V inventory report..." -ForegroundColor Cyan
 
-# Allow user to specify a custom output path
-$reportPath = Read-Host "Enter the desired output path for the report (press Enter to use default)" 
-if (-not $reportPath) {
-    $reportPath = "$($hostComputer.Name)-HyperV-Inventory-$(Get-Date -Format 'yyyyMMdd-HHmmss').html"
+# Allow user to specify a custom output path if in interactive mode
+if ($Interactive) {
+    $userPath = Read-Host "Enter the desired output path for the report (press Enter to use default: $OutputPath)"
+    if ($userPath) {
+        $OutputPath = $userPath
+    }
 }
 
 # Get all VMs and collect summary data
@@ -417,6 +454,16 @@ foreach ($vm in $virtualMachines) {
     $vmSecurity = $vm | Get-VMSecurity
     $vmFirmware = $vm | Get-VMFirmware
     
+    # Get guest OS information if available
+    $vmGuestOS = $null
+    try {
+        if (Get-Command -Name Get-VMGuest -ErrorAction SilentlyContinue) {
+            $vmGuestOS = $vm | Get-VMGuest
+        }
+    } catch {
+        $vmGuestOS = $null
+    }
+    
     # Get NUMA information if available
     $numaInfo = $null
     try {
@@ -470,6 +517,20 @@ foreach ($vm in $virtualMachines) {
             <tr><td>Minimum Memory</td><td>$([math]::Round($vmMemory.Minimum / 1GB, 2)) GB</td></tr>
             <tr><td>Maximum Memory</td><td>$([math]::Round($vmMemory.Maximum / 1GB, 2)) GB</td></tr>
             <tr><td>Snapshot Count</td><td>$($vmSnapshots.Count)</td></tr>
+"@
+
+    # Add guest OS information if available
+    if ($vmGuestOS) {
+        $htmlContent += @"
+            <tr><td>Guest OS</td><td>$($vmGuestOS.OSName)</td></tr>
+            <tr><td>Guest OS Version</td><td>$($vmGuestOS.OSVersion)</td></tr>
+            <tr><td>Guest OS Architecture</td><td>$($vmGuestOS.OSArchitecture)</td></tr>
+            <tr><td>Guest OS State</td><td>$($vmGuestOS.State)</td></tr>
+            <tr><td>Guest OS Uptime</td><td>$($vmGuestOS.Uptime)</td></tr>
+"@
+    }
+
+    $htmlContent += @"
         </table>
 
         <div class="cluster-info">
@@ -716,8 +777,8 @@ $htmlContent += @"
 
 # Save the HTML report with error handling
 try {
-    $htmlContent | Out-File -FilePath $reportPath -Force
-    Write-Host "Inventory report generated: $((Get-Item $reportPath).FullName)" -ForegroundColor Green
+    $htmlContent | Out-File -FilePath $OutputPath -Force
+    Write-Host "Inventory report generated: $((Get-Item $OutputPath).FullName)" -ForegroundColor Green
 } catch {
     Log-Error "Failed to save the report: $_"
 }
