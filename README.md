@@ -6,9 +6,13 @@ You are free to use this code and enhance it. Let me know if you do!
 
 ## Contents
 
-HyperVScripts Directory
+HyperV-Inventory Directory
 
 - **HyperV-Inventory.ps1**: Script to document HyperV virtual machines.
+
+ESXi-Inventory
+
+- **ESXi-Inventory.ps1**: Script to document ESXi virtual machines via PowerCLI.
 
 Windows Directory
 
@@ -25,13 +29,12 @@ Windows Directory
 
 1. Clone the repository to your local machine:
 
-      ```bash
-
       git clone https://github.com/ErickPH/powershellscripts.git
 
 2. Browse the available scripts in the repository.
 3. Run the scripts in PowerShell as an administrator, as many of them require elevated privileges.
-4. I try to document the scripts as neatly as possible. Enhancements are welcomed.
+4. Some scripts may need to enable powershell Bypass restriction.
+5. I try to document the scripts as neatly as possible. Enhancements are welcomed.
   
 
 ## Issues
