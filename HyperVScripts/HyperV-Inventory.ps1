@@ -34,6 +34,12 @@
         
         # Run in interactive mode with custom output path
         .\HyperV-Inventory.ps1 -Interactive -OutputPath "C:\Reports\HyperV-Inventory.html"
+
+    About the Execution Policy:
+        The script may require the execution policy to be set to Bypass, RemoteSigned or Unrestricted.
+        You can set the execution policy using the following command:
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        This sets the execution policy for the current PowerShell session only.
 #>
 
 # Default parameters
