@@ -479,22 +479,28 @@ foreach ($vm in $virtualMachines) {
             $kvp = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$vmElementName'" | 
                    Get-CimAssociatedInstance -ResultClassName Msvm_KvpExchangeComponent
             
-            if ($kvp) {
+            if ($kvp -and $kvp.GuestIntrinsicExchangeItems) {
                 $kvpData = @{}
-                $kvp.GuestIntrinsicExchangeItems | ForEach-Object {
-                    $kvpData[$_.Name] = [System.Text.Encoding]::Unicode.GetString($_.Data)
+                foreach ($item in $kvp.GuestIntrinsicExchangeItems) {
+                    if ($item.Data -ne $null) {
+                        $kvpData[$item.Name] = [System.Text.Encoding]::Unicode.GetString($item.Data)
+                    }
                 }
                 
-                $vmGuestOS = [PSCustomObject]@{
-                    OSName = $kvpData['OSName']
-                    OSVersion = $kvpData['OSVersion']
-                    OSArchitecture = $kvpData['OSArchitecture']
-                    State = $vm.State
-                    Uptime = $vm.Uptime
+                if ($kvpData.Count -gt 0) {
+                    $vmGuestOS = [PSCustomObject]@{
+                        OSName = $kvpData['OSName']
+                        OSVersion = $kvpData['OSVersion']
+                        OSArchitecture = $kvpData['OSArchitecture']
+                        State = $vm.State
+                        Uptime = $vm.Uptime
+                    }
+                    Write-Host "Retrieved guest OS info for $($vm.Name) using KVP: $($vmGuestOS.OSName)" -ForegroundColor Cyan
+                } else {
+                    Write-Host "No valid guest OS data found for $($vm.Name)" -ForegroundColor Yellow
                 }
-                Write-Host "Retrieved guest OS info for $($vm.Name) using KVP: $($vmGuestOS.OSName)" -ForegroundColor Cyan
             } else {
-                Write-Host "No guest OS info available for $($vm.Name)" -ForegroundColor Yellow
+                Write-Host "No KVP data available for $($vm.Name)" -ForegroundColor Yellow
             }
         }
     } catch {
