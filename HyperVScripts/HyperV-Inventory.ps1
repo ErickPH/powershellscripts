@@ -10,8 +10,9 @@
     Date           : 2025-05-01
     GitHub         : https://github.com/erickph
     Prerequisite   : PowerShell 5.1 or later, Hyper-V module
-    Version        : 1.11
+    Version        : 1.12
     Changelog      :
+        - Fixed guest OS detection to work for all VMs, not just the first one
         - Added Windows Server 2016 compatibility for guest OS detection
         - Added guest OS information for each VM (name, version, architecture, state, uptime)
         - Made -NonInteractive the default behavior
@@ -469,7 +470,12 @@ foreach ($vm in $virtualMachines) {
             $vmGuestOS = $vm | Get-VMGuest
         } else {
             # Legacy method (Windows Server 2016)
-            $kvp = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$($vm.Name)'" | 
+            $vmElementName = $vm.ElementName
+            if (-not $vmElementName) {
+                $vmElementName = $vm.Name
+            }
+            
+            $kvp = Get-CimInstance -Namespace root\virtualization\v2 -ClassName Msvm_ComputerSystem -Filter "ElementName='$vmElementName'" | 
                    Get-CimAssociatedInstance -ResultClassName Msvm_KvpExchangeComponent
             
             if ($kvp) {
